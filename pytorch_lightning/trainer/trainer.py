@@ -718,6 +718,11 @@ class Trainer(TrainerIO):
             self.get_test_dataloaders()
             self.get_val_dataloaders()
 
+    def __apply_ddp_barrier(self):
+        if self.use_ddp or self.use_ddp2:
+            # wait for all processes to catch up
+            dist.barrier()
+
     # -----------------------------
     # MODEL TRAINING
     # -----------------------------
@@ -997,6 +1002,7 @@ class Trainer(TrainerIO):
             if hasattr(ref_model, "hparams"):
                 self.logger.log_hyperparams(ref_model.hparams)
             self.logger.save()
+            self.__apply_ddp_barrier()
 
         # track model now.
         # if cluster resets state, the model will update with the saved weights
@@ -1065,6 +1071,7 @@ class Trainer(TrainerIO):
             # early stopping
             met_min_epochs = epoch_nb > self.min_nb_epochs
             if self.enable_early_stop and met_min_epochs:
+                self.__apply_ddp_barrier()
                 should_stop = self.early_stop_callback.on_epoch_end(epoch=epoch_nb,
                                                                     logs=self.callback_metrics)
                 # stop training
@@ -1074,6 +1081,7 @@ class Trainer(TrainerIO):
 
         if self.logger is not None:
             self.logger.finalize("success")
+            self.__apply_ddp_barrier()
 
     def run_training_epoch(self):
         # before epoch hook
@@ -1116,6 +1124,7 @@ class Trainer(TrainerIO):
             if (batch_nb + 1) % self.log_save_interval == 0 or early_stop_epoch:
                 if self.proc_rank == 0 and self.logger is not None:
                     self.logger.save()
+                    self.__apply_ddp_barrier()
 
             # when metrics should be logged
             if batch_nb % self.row_log_interval == 0 or early_stop_epoch:
@@ -1157,6 +1166,7 @@ class Trainer(TrainerIO):
         if self.proc_rank == 0 and self.logger is not None:
             self.logger.log_metrics(scalar_metrics, step_num=self.global_step)
             self.logger.save()
+            self.__apply_ddp_barrier()
 
     def test(self, model=None):
         if model is not None:
@@ -1492,3 +1502,4 @@ class Trainer(TrainerIO):
         if self.proc_rank == 0 and self.checkpoint_callback is not None and not test:
             self.checkpoint_callback.on_epoch_end(epoch=self.current_epoch,
                                                   logs=self.callback_metrics)
+            self.__apply_ddp_barrier()
